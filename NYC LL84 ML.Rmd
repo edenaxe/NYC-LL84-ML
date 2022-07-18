@@ -2,14 +2,18 @@
 title: "NYC LL84 ML"
 author: "Eden Axelrad"
 date: "7/17/2022"
-output: html_document
+output:
+  pdf_document: 
+    toc: yes
+    toc_depth: 3
+urlcolor: blue
 ---
 
 ## SECTION 1: Introduction and Overview
 
 - Data retrieved from NYC Open Data as part of Local Law 84 (LL84)
 - Data described as Data and metrics on water and energy consumption in privately owned buildings over 25,000 ft2 and in City-owned buildings over 10,000 ft2.
-- R script used to retrieve, wrangle, and clean the data frame used in this main report can be found here
+- R script used to retrieve, wrangle, and clean the data frame used in this main report can be found in the repo, or accessed via [this link](https://github.com/edenaxe/NYC-LL84-ML/blob/main/Get%20Data.R). 
 
 
 ## SECTION 2: Setup
@@ -22,14 +26,14 @@ In this section we set up the initial data set
 if (!require(tidyverse)) install.packages('tidyverse')
 if (!require(caret)) install.packages('caret')
 if (!require(rpart)) install.packages('rpart')
-if (!require(glmnet)) install.packages('glmnet')
+if (!require(randomForest)) install.packages('randomForest')
 if (!require(scales)) install.packages('scales')
 if (!require(knitr)) install.packages('knitr')
 
 library(tidyverse)
 library(caret)
 library(rpart)
-library(glmnet)
+library(randomForest)
 
 ```
 
@@ -85,7 +89,7 @@ NYC_LL84_ML %>%
   ggplot(aes(x = primary_property_type, 
              y = site_eui, 
              fill = primary_property_type)) +
-  geom_boxplot() +
+  geom_boxplot(size = .3, outlier.size = 0.3) +
   labs(x = "Primary Property Type",
        y = "Site Energy Use Intensity (kBtu/sqft)",
        title = "Site EUI by Primary Property Type") +
@@ -150,7 +154,7 @@ train_set <- NYC_LL84_ML %>% slice(-test_index)
 
 #####  Method #1: Naive Model
 
-```{r m1}
+```{r naive}
 
 ### Method #1: Naive Model
 # Start off with a naive model that uses the average rating to predict movie ratings
@@ -165,7 +169,7 @@ rmse_naive <- RMSE(pred = mu_hat,
 
 In the field, this is a common way of improving an estimate for EUI or GHG emissions. For this reason, I wanted to include it alongside the other methods. To execute it, simply find the average EUI by property type and left join with the test set. The assumption here is that property type is an easy way to break down the data in to categories that significantly impact EUI. 
 
-```{r m2}
+```{r prop avg}
 
 ### Method #2: Using average EUI by property type 
 
@@ -184,7 +188,7 @@ rmse_eui_avg <- RMSE(pred_eui_avg,
 
 ##### Method #3: Simple Linear Regression Using ENERGY STAR Score
 
-```{r m3}
+```{r lr}
 
 ### Method #3: Linear Regression with Energy Star Score
 # Create a linear model
@@ -209,7 +213,7 @@ rmse_lr <- RMSE(pred = pred_lr,
 
 ##### Method #4: Multiple Linear Regression with all variables
 
-```{r m4, warning=FALSE}
+```{r mlr, warning=FALSE}
 
 ### Method #4: Multiple Linear Regression with all variables
 # Create a linear model
@@ -232,41 +236,10 @@ rmse_mlr <- RMSE(pred = pred_mlr,
 
 ```
 
-##### Method #5: GLM with Regularization
-
-```{r m6, warning=FALSE}
-
-### Method 6: glment
-set.seed(92, sample.kind = "Rounding")
-model_glmnet <- train(site_eui ~ ., 
-                   data = train_set, 
-                   trControl = trainControl(method = "cv", repeats = 3),
-                   tuneGrid = expand.grid(alpha = 1,
-                                          lambda = seq(.01, 1, .01)),
-                   method = "glmnet")
-
-model_glmnet
-
-# Generate predicted Site EUI using the test set
-pred_glmnet <- predict(model_glmnet, 
-                      newdata = test_set)
-
-# Save the model RMSE
-rmse_glmnet <- RMSE(pred = pred_glmnet, 
-                    obs = test_set$site_eui, 
-                    na.rm = TRUE)
-
-ggplot(model_glmnet, highlight = TRUE) +
-  geom_text(position = position_nudge(x = .05, y = .01), 
-            aes(label = ifelse(lambda == model_glmnet$bestTune[2]$lambda, 
-                               round(min(model_glmnet$results$RMSE), digits = 2), ""))) +
-  labs(title = "Optimal Regularization Paramter (Lambda) for GLM Model") 
-
-```
 
 ##### Method #5: Classification and Regression Tree (CART)
 
-```{r m5, warning=FALSE}
+```{r cart, warning=FALSE}
 
 ### Method #5: Classification and Regression Tree (CART) with 'rpart'
 # Need to add CART to packages list
@@ -296,14 +269,76 @@ ggplot(model_rpart, highlight = TRUE) +
 
 ```
 
+##### Method #6: Random Forest
 
+```{r m6, warning=FALSE}
+
+### Method #6: Random forest 
+
+# Create a sample of the train set in order to speed up the training and tuning process
+set.seed(92, sample.kind = "Rounding")
+sample_index <- sample(nrow(train_set), 2000)
+sample_set <- train_set %>% slice(sample_index)
+
+
+# Begin with sample set, default parameters and minimal load
+model_rf_default <- train(site_eui ~ ., 
+                   data = sample_set,
+                   method = "rf", 
+                   ntree = 100,
+                   trControl = trainControl(method = "cv", number = 3))
+
+model_rf_default
+
+
+# Find number of optimal trees to include in the model
+ntrees <- c(100, 250, 500, 750, 1000)
+
+tree_test <- sapply(ntrees, function(ntrees) {
+  model_rf <- train(site_eui ~ ., 
+                    data = sample_set,
+                    method = "rf", 
+                    ntree = ntrees,
+                    trControl = trainControl(method = "cv", number = 3),
+                    tuneGrid = data.frame(mtry = model_rf_default$bestTune[[1]]),
+                    nSamp = 750)
+  min(model_rf$results$RMSE)
+})
+
+tree_results <- data.frame("ntrees" = ntrees, 
+                           "rmse" = tree_test) 
+
+```
+
+```{r}
+
+# Create the actual rf model using our tuning parameters
+# WARNING - Takes quite a long time to execute...
+model_rf <- train(site_eui ~ ., 
+                  data = train_set,
+                  method = "rf", 
+                  ntree = tree_results %>% slice_min(order_by = rmse) %>% .$ntrees,
+                  tuneGrid = data.frame(mtry = model_rf_default$bestTune[[1]]),
+                  trControl = trainControl(method = "cv", number = 3))
+
+model_rf
+
+# Generate predicted Site EUI using the test set
+pred_rf <- predict(model_rf, 
+                   newdata = test_set)
+
+rmse_rf <- RMSE(pred = pred_rf, 
+                    obs = test_set$site_eui, 
+                    na.rm = TRUE)
+
+```
 
 ### SECTION 3.3: Validation
 
 ```{r val}
 
 # Generate predicted Site EUI using the test set
-pred_validation <- predict(model_rpart, 
+pred_validation <- predict(model_rf, 
                       newdata = NYC_LL84_Validation)
 
 # Save the model RMSE
@@ -323,17 +358,24 @@ Results <- cbind.data.frame(Actual = test_set$site_eui,
                             `Naive Model` = mu_hat,
                             `Property Type Averages` = pred_eui_avg,
                             `Linear Regression` = pred_lr, 
-                            `Mulitple Linear Regression` = pred_mlr, 
-                            `GLM Net` = pred_glmnet,
-                            `CART` = pred_rpart) %>%
+                            `Multiple Linear Regression` = pred_mlr, 
+                            `CART` = pred_rpart,
+                            `Random Forest` = pred_rf) %>%
   pivot_longer(cols = 2:7,
                values_to = "Predicted",
                names_to = "Model") %>%
   mutate(Residual = Actual-Predicted) %>%
   select(Model, Actual, Predicted, Residual)
 
+# Create factors based on order of our methods
+Results$Model = factor(Results$Model, levels = c("Naive Model", 
+                                                 "Property Type Averages",
+                                                 "Linear Regression", 
+                                                 "Multiple Linear Regression",
+                                                 "CART", 
+                                                 "Random Forest"))
 
-# Actual vs predicted by model without outliers
+# Actual vs predicted by model with color as RMSE 
 Results %>%
   ggplot(aes(x = Actual, y = Predicted, color = abs(Residual))) +
   geom_point(alpha = 0.8) +
@@ -351,10 +393,12 @@ Results %>%
 # This section presents the modeling results and discusses the model performance
 # Final results table with test on validation set
 results_tbl <- tibble(
-  Method = c("Method #1", "Method #2", "Method #3", "Method #4", "Method #5", "Method #6", "Validation"),
+  Method = c("Method #1", "Method #2", "Method #3", "Method #4", 
+             "Method #5", "Method #6", "Validation"),
   Model = c("Naive Model", "EUI Averages", "LR - Energy Star", 
-            "Mulitple Linear Regression", "GLM Net", "CART", "CART"),
-  RMSE = c(rmse_naive, rmse_eui_avg, rmse_lr, rmse_mlr, rmse_glmnet, rmse_rpart, rmse_validation)) %>%
+            "Mulitple Linear Regression", "CART", "Random Forest", "Random Forest"),
+  RMSE = c(rmse_naive, rmse_eui_avg, rmse_lr, rmse_mlr, 
+           rmse_rpart, rmse_rf, rmse_validation)) %>%
   mutate(`RMSE Improvment` = scales::percent((RMSE-rmse_naive)/rmse_naive))
 
 results_tbl %>%
