@@ -121,7 +121,7 @@ NYC_LL84_ML %>%
 ```{r cor, warning=FALSE}
 
 # Look at correlation by feature for total GHG emissions 
-# Examine EUI data and check for outliers\
+# Examine EUI data and check for outliers
 NYC_LL84_ML %>%
   select_if(., is.numeric) %>%
   cor() %>%
@@ -156,10 +156,10 @@ train_set <- NYC_LL84_ML %>% slice(-test_index)
 
 ```{r naive}
 
-### Method #1: Naive Model
 # Start off with a naive model that uses the average rating to predict movie ratings
 mu_hat <- mean(train_set$site_eui)
 
+# Save the model RMSE
 rmse_naive <- RMSE(pred = mu_hat,
                    obs = test_set$site_eui)
 
@@ -171,8 +171,7 @@ In the field, this is a common way of improving an estimate for EUI or GHG emiss
 
 ```{r prop avg}
 
-### Method #2: Using average EUI by property type 
-
+# Generate predicted Site EUI using the test set
 pred_eui_avg <- left_join(test_set, 
                           train_set %>%
                             group_by(primary_property_type) %>%
@@ -180,6 +179,7 @@ pred_eui_avg <- left_join(test_set,
                           by = "primary_property_type") %>%
   .$pred_avg_eui
 
+# Save the model RMSE
 rmse_eui_avg <- RMSE(pred_eui_avg, 
                      obs = test_set$site_eui, 
                      na.rm = TRUE)
@@ -190,14 +190,11 @@ rmse_eui_avg <- RMSE(pred_eui_avg,
 
 ```{r lr}
 
-### Method #3: Linear Regression with Energy Star Score
 # Create a linear model
 set.seed(92, sample.kind = "Rounding")
 model_lr <- train(site_eui ~ energy_star_score, 
                data = train_set, 
                method = "lm")
-
-model_lr
 
 # Generate predicted Site EUI using the test set
 pred_lr <- predict(model_lr, 
@@ -215,15 +212,13 @@ rmse_lr <- RMSE(pred = pred_lr,
 
 ```{r mlr, warning=FALSE}
 
-### Method #4: Multiple Linear Regression with all variables
-# Create a linear model
+# Resampling: Cross-Validated (10 fold, repeated 3 times)
+# No pre-processing
 set.seed(92, sample.kind = "Rounding")
 model_mlr <- train(site_eui ~ ., 
                    trControl = trainControl(method = "repeatedcv", repeats = 3),
                    data = train_set, 
                    method = "lm")
-
-model_mlr
 
 # Generate predicted Site EUI using the test set
 pred_mlr <- predict(model_mlr, 
@@ -241,7 +236,6 @@ rmse_mlr <- RMSE(pred = pred_mlr,
 
 ```{r cart, warning=FALSE}
 
-### Method #5: Classification and Regression Tree (CART) with 'rpart'
 # Need to add CART to packages list
 set.seed(92, sample.kind = "Rounding")
 model_rpart <- train(site_eui ~ ., 
@@ -271,9 +265,7 @@ ggplot(model_rpart, highlight = TRUE) +
 
 ##### Method #6: Random Forest
 
-```{r m6, warning=FALSE}
-
-### Method #6: Random forest 
+```{r rf tune, warning=FALSE}
 
 # Create a sample of the train set in order to speed up the training and tuning process
 set.seed(92, sample.kind = "Rounding")
@@ -295,6 +287,7 @@ model_rf_default
 ntrees <- c(100, 250, 500, 750, 1000)
 
 tree_test <- sapply(ntrees, function(ntrees) {
+  set.seed(92, sample.kind = "Rounding")
   model_rf <- train(site_eui ~ ., 
                     data = sample_set,
                     method = "rf", 
@@ -310,10 +303,11 @@ tree_results <- data.frame("ntrees" = ntrees,
 
 ```
 
-```{r}
+```{r rf train}
 
 # Create the actual rf model using our tuning parameters
 # WARNING - Takes quite a long time to execute...
+set.seed(92, sample.kind = "Rounding")
 model_rf <- train(site_eui ~ ., 
                   data = train_set,
                   method = "rf", 
@@ -350,7 +344,7 @@ rmse_validation <- RMSE(pred = pred_validation,
 
 ## SECTION 4: Results
 
-insert text
+Comparing all models against the actual EUI values for reporting year 2019.
 
 ```{r results, warning=FALSE, message=FALSE}
 
@@ -388,6 +382,8 @@ Results %>%
 
 ```
 
+Final table depicting the RMSE results for all of our tested methods and the final validation. 
+
 ```{r final table}
 
 # This section presents the modeling results and discusses the model performance
@@ -395,7 +391,7 @@ Results %>%
 results_tbl <- tibble(
   Method = c("Method #1", "Method #2", "Method #3", "Method #4", 
              "Method #5", "Method #6", "Validation"),
-  Model = c("Naive Model", "EUI Averages", "LR - Energy Star", 
+  Model = c("Naive Model", "Property Type EUI Averages", "LR - ENERGY STAR Score", 
             "Mulitple Linear Regression", "CART", "Random Forest", "Random Forest"),
   RMSE = c(rmse_naive, rmse_eui_avg, rmse_lr, rmse_mlr, 
            rmse_rpart, rmse_rf, rmse_validation)) %>%
@@ -404,6 +400,29 @@ results_tbl <- tibble(
 results_tbl %>%
   mutate(RMSE = round(RMSE, digits = 2)) %>%
   knitr::kable()
+
+```
+
+Examining the variable/feature importance in our final model - random forest. 
+
+```{r rf importance}
+
+importance_df <- varImp(model_rf) 
+importance_df <- importance_df[["importance"]] %>%
+  rownames_to_column(var = "Feature") 
+
+importance_df %>%
+  mutate(Feature = gsub(pattern = "primary_property_type", 
+                        replacement = "Property Type = ",
+                        x = Feature),
+         Feature = fct_reorder(Feature, Overall)) %>%
+  slice_max(order_by = Overall, n =10) %>%
+  ggplot(aes(Feature, Overall)) +
+  geom_col(fill = "lightblue", alpha = .9) +
+  coord_flip() +
+  theme_light() +
+  labs(title = "Feature Importance in the Random Forest Model",
+       subtitle = "[Top 10 Features, Scaled]")
 
 ```
 
