@@ -14,7 +14,7 @@ Machine learning exercise using New York City's Local Law 84 benchmarking data. 
 
 ### Results
 
-The final test set RMSE was 25.11, a 46.8% improvement over the naive model. The final validation set (2019 RY) RMSE was 23.57, even lower than the test set. Results are presented by method in the summary table below. 
+The final test set RMSE was 25.67, a 45.7% improvement over the naive model. The final validation set (2019 RY) RMSE was 23.86, even lower than the test set. Results are presented by method in the summary table below. 
 
 ![Final Table](https://github.com/edenaxe/NYC-LL84-ML/blob/main/Images/Final%20RMSE%20Table.png)
 
