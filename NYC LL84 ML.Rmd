@@ -29,6 +29,7 @@ if (!require(rpart)) install.packages('rpart')
 if (!require(randomForest)) install.packages('randomForest')
 if (!require(scales)) install.packages('scales')
 if (!require(knitr)) install.packages('knitr')
+if (!require(kableExtra)) install.packages('kableExtra')
 if (!require(ggExtra)) install.packages('ggExtra')
 
 
@@ -71,9 +72,10 @@ This section explains the process and techniques used, including data cleaning, 
 # Summary of data frame
 glimpse(NYC_LL84_ML)
 
+# Summary stats for the Site EUI column
 summary(NYC_LL84_ML$site_eui)
 
-# EUI and GHG by Property Type
+# View EUI by property type and frequency of occurrence
 NYC_LL84_ML %>%
   group_by("Property Type" = primary_property_type) %>%
   summarise("Site EUI (kBtu/sqft)" = round(mean(site_eui), 
@@ -82,9 +84,7 @@ NYC_LL84_ML %>%
   arrange(desc(Count)) %>%
   knitr::kable()
 
-# Explore EUI 
-summary(NYC_LL84_ML$site_eui)
-
+# Create boxplot of site EUI by property type
 NYC_LL84_ML %>%
   mutate(primary_property_type = fct_reorder(primary_property_type, 
                                              site_eui)) %>%
@@ -105,12 +105,13 @@ NYC_LL84_ML %>%
 # Size of building versus EUI
 summary(NYC_LL84_ML$property_gfa)
 
+# Examine average EUI by building area quartile
 NYC_LL84_ML %>%
   mutate(size_quartile = case_when(
-    `property_gfa` > 113686 ~ 4,
-    `property_gfa` > 63968 & `property_gfa` <= 113686 ~ 3,
-    `property_gfa` > 40760 & `property_gfa` <= 63968 ~ 2,
-    `property_gfa` <= 40760 ~ 1)) %>%
+    `property_gfa` > 135575 ~ 4,
+    `property_gfa` > 80000 & `property_gfa` <= 135575 ~ 3,
+    `property_gfa` > 53900 & `property_gfa` <= 80000 ~ 2,
+    `property_gfa` <= 53900 ~ 1)) %>%
   group_by(size_quartile) %>%
   summarise("Site EUI (kBtu/sqft)" = round(mean(site_eui), 
                                            digits = 1),
@@ -122,8 +123,7 @@ NYC_LL84_ML %>%
 
 ```{r cor, warning=FALSE}
 
-# Look at correlation by feature for total GHG emissions 
-# Examine EUI data and check for outliers
+# Look at correlation by predictor for site EUI
 NYC_LL84_ML %>%
   select_if(., is.numeric) %>%
   cor() %>%
@@ -159,11 +159,8 @@ train_set <- NYC_LL84_ML %>% slice(-test_index)
 ```{r naive}
 
 # Start off with a naive model that uses the average rating to predict movie ratings
+# This will act as our predicted values for every observation of the test set EUI
 mu_hat <- mean(train_set$site_eui)
-
-# Save the model RMSE
-rmse_naive <- RMSE(pred = mu_hat,
-                   obs = test_set$site_eui)
 
 ```
 
@@ -173,7 +170,7 @@ In the field, this is a common way of improving an estimate for EUI or GHG emiss
 
 ```{r prop avg}
 
-# Generate predicted Site EUI using the test set
+# Generate predicted Site EUI using the test set predictors and property type averages
 pred_eui_avg <- left_join(test_set, 
                           train_set %>%
                             group_by(primary_property_type) %>%
@@ -181,32 +178,22 @@ pred_eui_avg <- left_join(test_set,
                           by = "primary_property_type") %>%
   .$pred_avg_eui
 
-# Save the model RMSE
-rmse_eui_avg <- RMSE(pred_eui_avg, 
-                     obs = test_set$site_eui, 
-                     na.rm = TRUE)
-
 ```
 
 ##### Method #3: Simple Linear Regression Using ENERGY STAR Score
 
 ```{r lr, warning=FALSE}
 
-# Create a linear model
+# Train a linear model using only ENERGY STAR score
 set.seed(92, sample.kind = "Rounding")
 model_lr <- train(site_eui ~ energy_star_score, 
                data = train_set, 
                method = "lm")
 
-# Generate predicted Site EUI using the test set
+# Generate predicted Site EUI using the test set predictors and simple linear regression
 pred_lr <- predict(model_lr, 
                 newdata = test_set %>%
                   select(site_eui, energy_star_score))
-
-# Save the model RMSE
-rmse_lr <- RMSE(pred = pred_lr, 
-                    obs = test_set$site_eui, 
-                    na.rm = TRUE)
 
 ```
 
@@ -214,23 +201,17 @@ rmse_lr <- RMSE(pred = pred_lr,
 
 ```{r mlr, warning=FALSE}
 
-# Resampling: Cross-Validated (10 fold, repeated 3 times)
-# No pre-processing
+# Train a linear model with all variables included
+# Use 10 fold cross-validation for resampling
 set.seed(92, sample.kind = "Rounding")
 model_mlr <- train(site_eui ~ ., 
-                   trControl = trainControl(method = "cv"),
                    data = train_set, 
-                   preProc = c("center", "scale"),
-                   method = "lm")
+                   method = "lm",
+                   trControl = trainControl(method = "cv", number = 10))
 
-# Generate predicted Site EUI using the test set
+# Generate predicted Site EUI using the test set predictors and MLR model
 pred_mlr <- predict(model_mlr, 
                     newdata = test_set)
-
-# Save the model RMSE
-rmse_mlr <- RMSE(pred = pred_mlr, 
-                    obs = test_set$site_eui, 
-                    na.rm = TRUE)
 
 ```
 
@@ -239,26 +220,20 @@ rmse_mlr <- RMSE(pred = pred_mlr,
 
 ```{r cart, warning=FALSE}
 
-# Need to add CART to packages list
+# Train a model using a CART method from 'rpart' package
+# Use 10 fold cross-validation for resampling
 set.seed(92, sample.kind = "Rounding")
 model_rpart <- train(site_eui ~ ., 
                      data = train_set, 
-                     trControl = trainControl(method = "cv"),
                      method = "rpart",
-                     preProc = c("center", "scale"),
+                     trControl = trainControl(method = "cv", number = 10),
                      tuneGrid = data.frame(cp = seq(.00001, .001, .0001)))
 
-model_rpart
-
-# Generate predicted Site EUI using the test set
+# Generate predicted Site EUI using the test set predictors and CART model
 pred_rpart <- predict(model_rpart, 
                       newdata = test_set)
 
-# Save the model RMSE
-rmse_rpart <- RMSE(pred = pred_rpart, 
-                   obs = test_set$site_eui, 
-                   na.rm = TRUE)
-
+# Generate a CART model plot which highlights our optimal tuning parameter (cp)
 ggplot(model_rpart, highlight = TRUE) +
   geom_text(position = position_nudge(x = 0.0001), 
             aes(label = ifelse(cp == model_rpart$bestTune[[1]], 
@@ -271,23 +246,22 @@ ggplot(model_rpart, highlight = TRUE) +
 
 ```{r rf tune, warning=FALSE}
 
-# Create a sample of the train set in order to speed up the training and tuning process
+# Create a sample of the train set in order to speed up the tuning process
 set.seed(92, sample.kind = "Rounding")
 sample_index <- sample(nrow(train_set), 2000)
 sample_set <- train_set %>% slice(sample_index)
 
 
-# Begin with sample set and minimal load test for optimal mtry
+# Begin with sample set and minimal load test (low ntree and 5-fold cv) for optimal mtry
 set.seed(92, sample.kind = "Rounding")
 model_rf_default <- train(site_eui ~ ., 
-                   data = sample_set,
-                   method = "rf", 
-                   ntree = 100,
-                   tuneGrid = data.frame(mtry = seq(5, 20, 2)),
-                   trControl = trainControl(method = "cv", number = 5))
+                          data = sample_set,
+                          method = "rf", 
+                          ntree = 100,
+                          trControl = trainControl(method = "cv", number = 5),
+                          tuneGrid = data.frame(mtry = 5:20))
 
-model_rf_default
-
+# View optimal tuning parameter (mtry) in a plot
 ggplot(model_rf_default, highlight = TRUE) +
   geom_text(position = position_nudge(y = 0.2), 
             aes(label = ifelse(mtry == model_rf_default$bestTune[[1]], 
@@ -300,6 +274,7 @@ ggplot(model_rf_default, highlight = TRUE) +
 # Find number of optimal trees to include in the model
 ntrees <- c(100, 250, 500, 750, 1000)
 
+# Use the sample test and optimal mtry to test out various tree sizes
 tree_test <- sapply(ntrees, function(ntrees) {
   set.seed(92, sample.kind = "Rounding")
   model_rf <- train(site_eui ~ ., 
@@ -319,7 +294,7 @@ tree_results <- data.frame("ntrees" = ntrees,
 
 ```{r rf train}
 
-# Create the actual rf model using our tuning parameters
+# Create the actual random forest model using our tuning parameters above
 # WARNING - Takes quite a long time to execute... 37.7 minutes
 set.seed(92, sample.kind = "Rounding")
 model_rf <- train(site_eui ~ ., 
@@ -331,13 +306,9 @@ model_rf <- train(site_eui ~ .,
 
 model_rf
 
-# Generate predicted Site EUI using the test set
+# Generate predicted Site EUI using the test set predictors and random forest model
 pred_rf <- predict(model_rf, 
                    newdata = test_set)
-
-rmse_rf <- RMSE(pred = pred_rf, 
-                    obs = test_set$site_eui, 
-                    na.rm = TRUE)
 
 ```
 
@@ -345,16 +316,18 @@ Examining the variable/feature importance in our final model - random forest.
 
 ```{r rf importance}
 
+# Find variable importance for the random forest model
 importance_df <- varImp(model_rf) 
 importance_df <- importance_df[["importance"]] %>%
   rownames_to_column(var = "Feature") 
 
+# Display top 10 most important variables in a bar plot
 importance_df %>%
   mutate(Feature = gsub(pattern = "primary_property_type", 
                         replacement = "Type = ",
                         x = Feature),
          Feature = fct_reorder(Feature, Overall)) %>%
-  slice_max(order_by = Overall, n =10) %>%
+  slice_max(order_by = Overall, n = 10) %>%
   ggplot(aes(Feature, Overall)) +
   geom_col(fill = "lightblue", alpha = .9) +
   scale_x_discrete(labels = function(x) str_wrap(x, width = 25)) +
@@ -369,14 +342,9 @@ importance_df %>%
 
 ```{r val}
 
-# Generate predicted Site EUI using the test set
+# Generate predicted Site EUI using the validation set and random forest model
 pred_validation <- predict(model_rf, 
                       newdata = NYC_LL84_Validation)
-
-# Save the model RMSE
-rmse_validation <- RMSE(pred = pred_validation, 
-                   obs = NYC_LL84_Validation$site_eui, 
-                   na.rm = TRUE)
 
 ```
 
@@ -384,10 +352,9 @@ rmse_validation <- RMSE(pred = pred_validation,
 
 ### SECTION 4.1: Comparing All Models
 
-Comparing all models against the actual EUI values for reporting year 2019.
-
 ```{r results, message=FALSE, warning=FALSE}
 
+# Save predicted values and residuals for all models in a data frame
 Results <- cbind.data.frame(Actual = test_set$site_eui, 
                             `Naive Model` = mu_hat,
                             `Property Type Averages` = pred_eui_avg,
@@ -401,7 +368,7 @@ Results <- cbind.data.frame(Actual = test_set$site_eui,
   mutate(Residual = Predicted - Actual) %>%
   select(Model, Actual, Predicted, Residual)
 
-# Create factors based on order of our methods
+# Create model factor levels based on order of our methods (increasing complexity)
 Results$Model = factor(Results$Model, levels = c("Naive Model", 
                                                  "Property Type Averages",
                                                  "Linear Regression", 
@@ -409,7 +376,7 @@ Results$Model = factor(Results$Model, levels = c("Naive Model",
                                                  "CART", 
                                                  "Random Forest"))
 
-# Actual vs predicted by model with color as RMSE 
+# Regression plots for actual vs predicted by model with color as RMSE 
 Results %>%
   ggplot(aes(x = Actual, y = Predicted, color = abs(Residual))) +
   geom_point(alpha = 0.8, size = 1) +
@@ -419,28 +386,66 @@ Results %>%
   xlim(0, 700) +
   coord_equal() +
   facet_wrap(~Model) +
-  labs(color = "Residual",
-       title = "Actual vs Predicted Values by Model")
+  labs(x = "Actual EUI (kBtu/sqft)",
+       y = "Predicted EUI (kBtu/sqft)",
+       color = "Residual",
+       title = "Regression Plots - Actual vs Predicted EUIs by Model") +
+  theme(plot.title = element_text(hjust=0.5))
 
 ```
+
+```{r}
+
+# Boxplot of residuals by model
+Results %>%
+  ggplot(aes(x = Model, y = Residual, color = Model)) +
+  geom_boxplot() +
+  theme_minimal() +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust=0.5),
+        plot.subtitle = element_text(hjust=0.5)) +
+  coord_flip()
+
+```
+
 
 Final table depicting the RMSE results for all of our tested methods and the final validation. 
 
 ```{r final table}
 
-# This section presents the modeling results and discusses the model performance
-# Final results table with test on validation set
-results_tbl <- tibble(
+# Set the knitr options to omit NA from table output
+opts <- options(knitr.kable.NA = "")
+
+
+# Creating a function that uses predicted values to calculate R-squared, MAE, and RMSE 
+gen_results <- function(model) {
+  results <- postResample(pred = model, obs = test_set$site_eui) %>% 
+    as.data.frame() %>%
+    t() 
+}
+
+# Final results table with method, model, R-squared, MAE, and RMSE 
+Results_Summary <- tibble(
   Method = c("Method #1", "Method #2", "Method #3", "Method #4", 
              "Method #5", "Method #6", "Validation"),
   Model = c("Naive Model", "Property Type EUI Averages", "LR - ENERGY STAR Score", 
             "Mulitple Linear Regression", "CART", "Random Forest", "Random Forest"),
-  RMSE = c(rmse_naive, rmse_eui_avg, rmse_lr, rmse_mlr, 
-           rmse_rpart, rmse_rf, rmse_validation)) %>%
-  mutate(`RMSE Improvment` = scales::percent((RMSE-rmse_naive)/rmse_naive))
+  rbind.data.frame(
+    gen_results(mu_hat), gen_results(pred_eui_avg), gen_results(pred_lr),
+    gen_results(pred_mlr), gen_results(pred_rpart), gen_results(pred_rf),
+    postResample(pred = pred_validation, obs = NYC_LL84_Validation$site_eui) %>% 
+      as.data.frame() %>% t())
+) %>%
+  mutate(`RMSE Improvement` = scales::percent((RMSE-RMSE[[1]])/RMSE[[1]])) %>%
+  select(Method, Model, Rsquared, MAE, RMSE, `RMSE Improvement`) 
 
-results_tbl %>%
-  knitr::kable(align = c('l', 'l', 'c', 'c'), digits = 2)
+Results_Summary %>%
+  knitr::kable(align = c('l', 'l', rep('c', 4)), 
+               digits = 2,
+               booktabs = TRUE,
+               caption = "Final Summary Table for All Models") %>%
+  kableExtra::row_spec(7, bold = TRUE) %>%
+  kableExtra::row_spec(6, hline_after = TRUE)
 
 ```
 
@@ -461,7 +466,9 @@ ggExtra::ggMarginal(cbind.data.frame(Actual = NYC_LL84_Validation$site_eui,
                       ylim(0, 700) +
                       xlim(0, 700) +
                       coord_equal(ratio = 1) +
-                      labs(color = "Residual",
+                      labs(x = "Actual EUI (kBtu/sqft)",
+                           y = "Predicted EUI (kBtu/sqft)",
+                           color = "Residual",
                            title = "Actual vs Predicted Values",
                            subtitle = "For Random Forest Model") +
                       theme_classic() +
@@ -489,20 +496,6 @@ cbind.data.frame(Actual = NYC_LL84_Validation$site_eui,
             Count = n()) %>%
   arrange(desc(Count)) %>%
   knitr::kable()
-
-# Box plot of residuals by property type
-cbind.data.frame(Actual = NYC_LL84_Validation$site_eui, 
-                 `Predicted` = pred_validation,
-                 `Property Type` = NYC_LL84_Validation$primary_property_type) %>% 
-  mutate(Residual = Predicted - Actual,
-         `Property Type` = fct_reorder(`Property Type`, abs(Residual))) %>%
-  ggplot(aes(x = `Property Type`, y = Residual, color = `Property Type`)) +
-  geom_boxplot(size = .3, outlier.size = 0.3) +
-  labs(x = "Primary Property Type",
-       y = "Residual",
-       title = "Residual by Primary Property Type") +
-  theme(legend.position = "none") +
-  coord_flip()
 
 ```
 
