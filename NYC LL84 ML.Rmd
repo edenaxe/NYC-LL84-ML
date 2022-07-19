@@ -341,6 +341,30 @@ rmse_rf <- RMSE(pred = pred_rf,
 
 ```
 
+Examining the variable/feature importance in our final model - random forest. 
+
+```{r rf importance}
+
+importance_df <- varImp(model_rf) 
+importance_df <- importance_df[["importance"]] %>%
+  rownames_to_column(var = "Feature") 
+
+importance_df %>%
+  mutate(Feature = gsub(pattern = "primary_property_type", 
+                        replacement = "Type = ",
+                        x = Feature),
+         Feature = fct_reorder(Feature, Overall)) %>%
+  slice_max(order_by = Overall, n =10) %>%
+  ggplot(aes(Feature, Overall)) +
+  geom_col(fill = "lightblue", alpha = .9) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 25)) +
+  coord_flip() +
+  theme_light() +
+  labs(title = "Feature Importance in the Random Forest Model",
+       subtitle = "[Top 10 Features, Scaled]")
+
+```
+
 ### SECTION 3.3: Validation
 
 ```{r val}
@@ -357,6 +381,8 @@ rmse_validation <- RMSE(pred = pred_validation,
 ```
 
 ## SECTION 4: Results
+
+### SECTION 4.1: Comparing All Models
 
 Comparing all models against the actual EUI values for reporting year 2019.
 
@@ -398,31 +424,6 @@ Results %>%
 
 ```
 
-```{r}
-
-# Actual vs predicted for random forest only, showing marginal distribution
-ggExtra::ggMarginal(Results %>%
-                      filter(Model == "Random Forest") %>%
-                      ggplot(aes(x = Actual, y = Predicted, color = abs(Residual))) +
-                      geom_point(alpha = 0.8) +
-                      scale_color_gradient(low = "blue", high = "red") +
-                      geom_smooth(color = "black") +
-                      ylim(0, 700) +
-                      xlim(0, 700) +
-                      coord_equal(ratio = 1) +
-                      labs(color = "Residual",
-                           title = "Actual vs Predicted Values",
-                           subtitle = "For Random Forest Model") +
-                      theme_classic() +
-                      theme(legend.position = "bottom") + 
-                      guides(color = guide_colourbar(ticks = FALSE, 
-                                                     label = FALSE,
-                                                     barheight = 0.8,
-                                                     title.vjust = 0.9)),
-                    type = "density", color = "darkgray")
-
-```
-
 Final table depicting the RMSE results for all of our tested methods and the final validation. 
 
 ```{r final table}
@@ -443,27 +444,65 @@ results_tbl %>%
 
 ```
 
-Examining the variable/feature importance in our final model - random forest. 
+### SECTION 4.2: Validation Set Exploratory Analysis
 
-```{r rf importance}
+Examining results for the validation set
 
-importance_df <- varImp(model_rf) 
-importance_df <- importance_df[["importance"]] %>%
-  rownames_to_column(var = "Feature") 
+```{r marginal plot, warning=FALSE, message=FALSE}
 
-importance_df %>%
-  mutate(Feature = gsub(pattern = "primary_property_type", 
-                        replacement = "Type = ",
-                        x = Feature),
-         Feature = fct_reorder(Feature, Overall)) %>%
-  slice_max(order_by = Overall, n =10) %>%
-  ggplot(aes(Feature, Overall)) +
-  geom_col(fill = "lightblue", alpha = .9) +
-  scale_x_discrete(labels = function(x) str_wrap(x, width = 25)) +
-  coord_flip() +
-  theme_light() +
-  labs(title = "Feature Importance in the Random Forest Model",
-       subtitle = "[Top 10 Features, Scaled]")
+# Validation set - actual vs predicted with marginal distribution
+ggExtra::ggMarginal(cbind.data.frame(Actual = NYC_LL84_Validation$site_eui, 
+                                     `Predicted` = pred_validation) %>% 
+                      mutate(Residual = Predicted - Actual) %>%
+                      ggplot(aes(x = Actual, y = Predicted, color = abs(Residual))) +
+                      geom_point(alpha = 0.8) +
+                      scale_color_gradient(low = "blue", high = "red") +
+                      geom_smooth(color = "black") +
+                      ylim(0, 700) +
+                      xlim(0, 700) +
+                      coord_equal(ratio = 1) +
+                      labs(color = "Residual",
+                           title = "Actual vs Predicted Values",
+                           subtitle = "For Random Forest Model") +
+                      theme_classic() +
+                      theme(legend.position = "bottom",
+                            plot.title = element_text(hjust=0.5),
+                            plot.subtitle = element_text(hjust=0.5)) + 
+                      guides(color = guide_colourbar(ticks = FALSE, 
+                                                     label = FALSE,
+                                                     barheight = 0.8,
+                                                     title.vjust = 0.9)),
+                    type = "density", 
+                    color = "darkgray")
+
+```
+
+```{r}
+
+# RMSE by property type for the validation set
+cbind.data.frame(Actual = NYC_LL84_Validation$site_eui, 
+                 `Predicted` = pred_validation,
+                 `Property Type` = NYC_LL84_Validation$primary_property_type) %>% 
+  mutate(Residual = Predicted - Actual) %>%
+  group_by(`Property Type`) %>%
+  summarize(RMSE = round(RMSE(Predicted, Actual, na.rm = TRUE), digits = 2),
+            Count = n()) %>%
+  arrange(desc(Count)) %>%
+  knitr::kable()
+
+# Box plot of residuals by property type
+cbind.data.frame(Actual = NYC_LL84_Validation$site_eui, 
+                 `Predicted` = pred_validation,
+                 `Property Type` = NYC_LL84_Validation$primary_property_type) %>% 
+  mutate(Residual = Predicted - Actual,
+         `Property Type` = fct_reorder(`Property Type`, abs(Residual))) %>%
+  ggplot(aes(x = `Property Type`, y = Residual, color = `Property Type`)) +
+  geom_boxplot(size = .3, outlier.size = 0.3) +
+  labs(x = "Primary Property Type",
+       y = "Residual",
+       title = "Residual by Primary Property Type") +
+  theme(legend.position = "none") +
+  coord_flip()
 
 ```
 
