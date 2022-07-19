@@ -5,7 +5,7 @@ date: "7/17/2022"
 output:
   pdf_document: 
     toc: yes
-    toc_depth: 3
+    toc_depth: 6
 urlcolor: blue
 ---
 
@@ -29,6 +29,8 @@ if (!require(rpart)) install.packages('rpart')
 if (!require(randomForest)) install.packages('randomForest')
 if (!require(scales)) install.packages('scales')
 if (!require(knitr)) install.packages('knitr')
+if (!require(ggExtra)) install.packages('ggExtra')
+
 
 library(tidyverse)
 library(caret)
@@ -188,7 +190,7 @@ rmse_eui_avg <- RMSE(pred_eui_avg,
 
 ##### Method #3: Simple Linear Regression Using ENERGY STAR Score
 
-```{r lr}
+```{r lr, warning=FALSE}
 
 # Create a linear model
 set.seed(92, sample.kind = "Rounding")
@@ -216,8 +218,9 @@ rmse_lr <- RMSE(pred = pred_lr,
 # No pre-processing
 set.seed(92, sample.kind = "Rounding")
 model_mlr <- train(site_eui ~ ., 
-                   trControl = trainControl(method = "repeatedcv", repeats = 3),
+                   trControl = trainControl(method = "cv"),
                    data = train_set, 
+                   preProc = c("center", "scale"),
                    method = "lm")
 
 # Generate predicted Site EUI using the test set
@@ -240,8 +243,9 @@ rmse_mlr <- RMSE(pred = pred_mlr,
 set.seed(92, sample.kind = "Rounding")
 model_rpart <- train(site_eui ~ ., 
                      data = train_set, 
-                     trControl = trainControl(method = "repeatedcv", repeats = 3),
+                     trControl = trainControl(method = "cv"),
                      method = "rpart",
+                     preProc = c("center", "scale"),
                      tuneGrid = data.frame(cp = seq(.00001, .001, .0001)))
 
 model_rpart
@@ -273,14 +277,24 @@ sample_index <- sample(nrow(train_set), 2000)
 sample_set <- train_set %>% slice(sample_index)
 
 
-# Begin with sample set, default parameters and minimal load
+# Begin with sample set and minimal load test for optimal mtry
+set.seed(92, sample.kind = "Rounding")
 model_rf_default <- train(site_eui ~ ., 
                    data = sample_set,
                    method = "rf", 
                    ntree = 100,
-                   trControl = trainControl(method = "cv", number = 3))
+                   tuneGrid = data.frame(mtry = seq(5, 20, 2)),
+                   trControl = trainControl(method = "cv", number = 5))
 
 model_rf_default
+
+ggplot(model_rf_default, highlight = TRUE) +
+  geom_text(position = position_nudge(y = 0.2), 
+            aes(label = ifelse(mtry == model_rf_default$bestTune[[1]], 
+                               round(min(model_rf_default$results$RMSE), 
+                                     digits = 2), ""))) +
+  labs(title = "Optimal Number of Randomly Selected Predictors for Random Forest",
+       subtitle = "Using Sample Set (n = 2,000) and 100 Trees") 
 
 
 # Find number of optimal trees to include in the model
@@ -292,28 +306,28 @@ tree_test <- sapply(ntrees, function(ntrees) {
                     data = sample_set,
                     method = "rf", 
                     ntree = ntrees,
-                    trControl = trainControl(method = "cv", number = 3),
+                    trControl = trainControl(method = "cv", number = 5),
                     tuneGrid = data.frame(mtry = model_rf_default$bestTune[[1]]),
                     nSamp = 750)
   min(model_rf$results$RMSE)
 })
 
 tree_results <- data.frame("ntrees" = ntrees, 
-                           "rmse" = tree_test) 
+                           "rmse" = tree_test)  
 
 ```
 
 ```{r rf train}
 
 # Create the actual rf model using our tuning parameters
-# WARNING - Takes quite a long time to execute...
+# WARNING - Takes quite a long time to execute... 37.7 minutes
 set.seed(92, sample.kind = "Rounding")
 model_rf <- train(site_eui ~ ., 
                   data = train_set,
                   method = "rf", 
                   ntree = tree_results %>% slice_min(order_by = rmse) %>% .$ntrees,
                   tuneGrid = data.frame(mtry = model_rf_default$bestTune[[1]]),
-                  trControl = trainControl(method = "cv", number = 3))
+                  trControl = trainControl(method = "cv"))
 
 model_rf
 
@@ -346,7 +360,7 @@ rmse_validation <- RMSE(pred = pred_validation,
 
 Comparing all models against the actual EUI values for reporting year 2019.
 
-```{r results, warning=FALSE, message=FALSE}
+```{r results, message=FALSE, warning=FALSE}
 
 Results <- cbind.data.frame(Actual = test_set$site_eui, 
                             `Naive Model` = mu_hat,
@@ -358,7 +372,7 @@ Results <- cbind.data.frame(Actual = test_set$site_eui,
   pivot_longer(cols = 2:7,
                values_to = "Predicted",
                names_to = "Model") %>%
-  mutate(Residual = Actual-Predicted) %>%
+  mutate(Residual = Predicted - Actual) %>%
   select(Model, Actual, Predicted, Residual)
 
 # Create factors based on order of our methods
@@ -372,13 +386,40 @@ Results$Model = factor(Results$Model, levels = c("Naive Model",
 # Actual vs predicted by model with color as RMSE 
 Results %>%
   ggplot(aes(x = Actual, y = Predicted, color = abs(Residual))) +
-  geom_point(alpha = 0.8) +
+  geom_point(alpha = 0.8, size = 1) +
   scale_color_gradient(low = "blue", high = "red") +
   geom_smooth(color = "black", size = .5) +
+  ylim(0, 700) +
+  xlim(0, 700) +
   coord_equal() +
   facet_wrap(~Model) +
   labs(color = "Residual",
        title = "Actual vs Predicted Values by Model")
+
+```
+
+```{r}
+
+# Actual vs predicted for random forest only, showing marginal distribution
+ggExtra::ggMarginal(Results %>%
+                      filter(Model == "Random Forest") %>%
+                      ggplot(aes(x = Actual, y = Predicted, color = abs(Residual))) +
+                      geom_point(alpha = 0.8) +
+                      scale_color_gradient(low = "blue", high = "red") +
+                      geom_smooth(color = "black") +
+                      ylim(0, 700) +
+                      xlim(0, 700) +
+                      coord_equal(ratio = 1) +
+                      labs(color = "Residual",
+                           title = "Actual vs Predicted Values",
+                           subtitle = "For Random Forest Model") +
+                      theme_classic() +
+                      theme(legend.position = "bottom") + 
+                      guides(color = guide_colourbar(ticks = FALSE, 
+                                                     label = FALSE,
+                                                     barheight = 0.8,
+                                                     title.vjust = 0.9)),
+                    type = "density", color = "darkgray")
 
 ```
 
@@ -398,8 +439,7 @@ results_tbl <- tibble(
   mutate(`RMSE Improvment` = scales::percent((RMSE-rmse_naive)/rmse_naive))
 
 results_tbl %>%
-  mutate(RMSE = round(RMSE, digits = 2)) %>%
-  knitr::kable()
+  knitr::kable(align = c('l', 'l', 'c', 'c'), digits = 2)
 
 ```
 
@@ -413,12 +453,13 @@ importance_df <- importance_df[["importance"]] %>%
 
 importance_df %>%
   mutate(Feature = gsub(pattern = "primary_property_type", 
-                        replacement = "Property Type = ",
+                        replacement = "Type = ",
                         x = Feature),
          Feature = fct_reorder(Feature, Overall)) %>%
   slice_max(order_by = Overall, n =10) %>%
   ggplot(aes(Feature, Overall)) +
   geom_col(fill = "lightblue", alpha = .9) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 25)) +
   coord_flip() +
   theme_light() +
   labs(title = "Feature Importance in the Random Forest Model",
