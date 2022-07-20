@@ -13,11 +13,11 @@ urlcolor: blue
 
 This introductory section describes the data set, variables, project goals, and key steps.
 
-The data set used for this machine learning exercise combines building information data and weather data for New York City. The building data was retrieved from NYC Open Data and is part of the city's Local Law 84 (LL84). LL84 is contributes to the city's building performance standard benchmarking efforts and applies to any privately owned buildings over 25,000 square feet and municipal buildings over 10,000 square feet. Most importantly, the data set includes metrics on energy use and consumption by building during a reporting year. This data was supplemented with weather data from 3 local weather stations - Central Park, LaGuardia, and Kennedy. The weather data was aggregated up to a calendar year and used as an average of all three stations.
+The data set used for this project combines building information data and weather data for New York City. The building data was retrieved from NYC Open Data and is part of the city's Local Law 84 (LL84). LL84 contributes to the city's building performance standard and benchmarking efforts and applies to any privately owned buildings over 25,000 square feet and municipal buildings over 10,000 square feet. Most importantly, the data set includes metrics on energy use and consumption by building for each reporting year. This data was supplemented with weather data from 3 local weather stations - Central Park, LaGuardia, and Kennedy. The weather data was aggregated up to a calendar year and used as an average of all three stations.
 
 The final data set (which is used here) is a cleaned and aggregated data set consisting of LL84 data and weather data for 2016, 2017, 2018, and 2019. The R script I used to retrieve, wrangle, and clean the data can be found in the project repo, or accessed via [this link](https://github.com/edenaxe/NYC-LL84-ML/blob/main/Get%20Data.R).
 
-While there were many more (hundreds) metrics available through LL84, I wanted to crop the final variable list to include data that is publicly available and easy to retrieve for most buildings. This provided the following list of parameters:
+While there were many more (hundreds) variables available through LL84, I wanted to crop the final variable list to include data that is publicly available and easy to retrieve for most buildings. This provided the following list of parameters:
 
 -   Reporting Year (year)
 
@@ -45,11 +45,11 @@ While there were many more (hundreds) metrics available through LL84, I wanted t
 
 -   Mean Minimum Annual Temperature (MeanMinTemp)
 
-**The project goal was to predict a building's Site Energy Use Intensity (EUI) using common and publicly available variables**. Site EUI is metric commonly used for describing a buildings energy efficiency, typically with a unit of kBtu per square foot. Sites with lower EUI, use less energy per square foot. This can be particularly useful for benchmarking across similar property types, setting energy efficiency reduction targets, or assessing the impacts of energy efficiency improvements.
+**The project goal is to predict a building's Site Energy Use Intensity (EUI) using common and publicly available variables**. Site EUI is metric commonly used for describing a buildings energy efficiency, typically with a unit of kBtu per square foot. Sites with lower EUI, use less energy per square foot. This can be particularly useful for benchmarking across similar property types, setting energy efficiency reduction targets, or assessing the impacts of energy efficiency improvements.
 
-To achieve the above goal, I first obtained a better understanding of the data set with exploratory analysis. Next, I applied several modeling techniques with increasing complexity in order to observe changes in performance (using root mean square error, RMSE, as a primary metric). These approaches include a naive model, using property type EUI averages, simple linear regression, multiple linear regression, classification and regression tree, and random forest.
+To achieve the above goal, I first obtained a better understanding of the data set with exploratory analysis. Next, I applied several modeling techniques with increasing complexity in order to observe changes in performance (using root-mean-square error, RMSE, as a primary metric). These approaches include a naive model, using property type EUI averages, simple linear regression, multiple linear regression, classification and regression tree, and random forest.
 
-I decided to utilize 2016, 2017, and 2018 reporting year data for my train and test set, with 2019 left out for a final validation.
+I decided to utilize 2016, 2017, and 2018 reporting year data for my train and test set, with 2019 left out for a final validation. 
 
 ## SECTION 2: Setup
 
@@ -64,9 +64,7 @@ if (!require(rpart)) install.packages('rpart')
 if (!require(randomForest)) install.packages('randomForest')
 if (!require(scales)) install.packages('scales')
 if (!require(knitr)) install.packages('knitr')
-if (!require(kableExtra)) install.packages('kableExtra')
 if (!require(ggExtra)) install.packages('ggExtra')
-
 
 library(tidyverse)
 library(caret)
@@ -146,16 +144,15 @@ summary(NYC_LL84_ML$property_gfa)
 
 # Examine average EUI by building area quartile
 NYC_LL84_ML %>%
-  mutate(size_quartile = case_when(
+  mutate(`Size Quartile` = case_when(
     `property_gfa` > 135575 ~ 4,
     `property_gfa` > 80000 & `property_gfa` <= 135575 ~ 3,
     `property_gfa` > 53900 & `property_gfa` <= 80000 ~ 2,
     `property_gfa` <= 53900 ~ 1)) %>%
-  group_by(size_quartile) %>%
-  summarise("Site EUI (kBtu/sqft)" = round(mean(site_eui), 
-                                           digits = 1),
+  group_by(`Size Quartile`) %>%
+  summarise("Site EUI (kBtu/sqft)" = round(mean(site_eui), digits = 1),
             Count = n())  %>%
-  arrange(size_quartile) %>%
+  arrange(`Size Quartile`) %>%
   knitr::kable()
 
 ```
@@ -191,9 +188,9 @@ train_set <- NYC_LL84_ML %>% slice(-test_index)
 
 ```
 
-##### Method \#1: Naive Model
+##### Method 1: Naive Model  
 
-I start off with a naive model that uses the train set average EUI as a predictor. This value will act as our predicted values for every observation of the test set EUI. The naive model is an important reference point for other models.
+I start off with a naive model that uses the train set average EUI as a predictor. This value will act as our predicted values for every observation of the test set EUI. The naive model is an important performance reference point for other models.
 
 ```{r naive}
 
@@ -202,7 +199,7 @@ mu_hat <- mean(train_set$site_eui)
 
 ```
 
-##### Method \#2: Mean EUI by Property Type
+##### Method 2: Mean EUI by Property Type  
 
 In the field, this is a common way of improving an estimate for EUI or GHG emissions. For this reason, I wanted to include it alongside the other methods. To execute it, I simply find the average EUI by property type and left join with the test set. The assumption here is that property type is an easy way to break down the data in to categories that significantly impact EUI.
 
@@ -218,7 +215,7 @@ pred_eui_avg <- left_join(test_set,
 
 ```
 
-##### Method \#3: Simple Linear Regression Using ENERGY STAR Score
+##### Method 3: Simple Linear Regression Using ENERGY STAR Score  
 
 Next up, I wanted to construct a simple linear model using ENERGY STAR score. I chose this variable since we saw that it is by far the most correlated with Site EUI. To train this model I used a 10-fold cross validation and no pre-processing.
 
@@ -232,13 +229,12 @@ model_lr <- train(site_eui ~ energy_star_score,
                   trControl = trainControl(method = "cv", number = 10))
 
 # Generate predicted Site EUI using the test set predictors and simple linear regression
-pred_lr <- predict(model_lr, 
-                newdata = test_set %>%
+pred_lr <- predict(model_lr, newdata = test_set %>%
                   select(site_eui, energy_star_score))
 
 ```
 
-##### Method \#4: Multiple Linear Regression with all variables
+##### Method 4: Multiple Linear Regression with All Variables  
 
 I build upon the simple linear model and add in the remaining predictors to create a multiple linear regression model. I was curious to see the impact the remaining variables had on RMSE (and other performance metrics). To train this model I used a 10-fold cross validation and no pre-processing.
 
@@ -253,12 +249,11 @@ model_mlr <- train(site_eui ~ .,
                    trControl = trainControl(method = "cv", number = 10))
 
 # Generate predicted Site EUI using the test set predictors and MLR model
-pred_mlr <- predict(model_mlr, 
-                    newdata = test_set)
+pred_mlr <- predict(model_mlr, newdata = test_set)
 
 ```
 
-##### Method \#5: Classification and Regression Tree (CART)
+##### Method 5: Classification and Regression Tree (CART)  
 
 Moving on to more complex methods, I decided to implement a decision tree algorithm. The classification and regression tree (CART), as the name implies can be used for both classification and regression models. The CART model uses complexity parameters for tuning, which dictates the size of the tree. A smaller complexity parameter reduces the threshold at which another node is added, but going too far can overfit the data. Results for optimal number complexity parameters are shown in the graph below.
 
@@ -274,8 +269,7 @@ model_rpart <- train(site_eui ~ .,
                      tuneGrid = data.frame(cp = seq(.00001, .001, .0001)))
 
 # Generate predicted Site EUI using the test set predictors and CART model
-pred_rpart <- predict(model_rpart, 
-                      newdata = test_set)
+pred_rpart <- predict(model_rpart, newdata = test_set)
 
 # Generate a CART model plot which highlights our optimal tuning parameter (cp)
 ggplot(model_rpart, highlight = TRUE) +
@@ -286,7 +280,7 @@ ggplot(model_rpart, highlight = TRUE) +
 
 ```
 
-##### Method \#6: Random Forest
+##### Method 6: Random Forest  
 
 Because there was a lot of success using the decision tree, a random forest model felt like a logical next step. To my understanding, a random forest machine learning algorithm is an ensemble of decision trees created on random samples of the data set. This technique is well known for its predictive power. The only down side is that it is computationally taxing. Since I am working with a failing computer from 2016, I had to piecemeal the model tuning using a sample set. To tune this model, I took a 2,000 observation sample from the train set, used 5 fold cross-validation instead of 10, and split up the tuning for number of trees and number of randomly selected predictors. This allowed me to define the best tuning parameters which I then used to train the original data set.
 
@@ -339,7 +333,7 @@ tree_results <- data.frame("ntrees" = ntrees,
 
 ```
 
-```{r rf train}
+```{r rf train, warning=FALSE}
 
 # Create the actual random forest model using our tuning parameters above
 # WARNING - Takes quite a long time to execute... 37.7 minutes
@@ -352,8 +346,7 @@ model_rf <- train(site_eui ~ .,
                   trControl = trainControl(method = "cv"))
 
 # Generate predicted Site EUI using the test set predictors and random forest model
-pred_rf <- predict(model_rf, 
-                   newdata = test_set)
+pred_rf <- predict(model_rf, newdata = test_set)
 
 ```
 
@@ -388,8 +381,7 @@ Since I had the most success with the random forest model, it was the model I de
 ```{r val}
 
 # Generate predicted Site EUI using the validation set and random forest model
-pred_validation <- predict(model_rf, 
-                      newdata = NYC_LL84_Validation)
+pred_validation <- predict(model_rf, newdata = NYC_LL84_Validation)
 
 ```
 
@@ -430,7 +422,7 @@ Results %>%
   ggplot(aes(x = Actual, y = Predicted, color = abs(Residual))) +
   geom_point(alpha = 0.8, size = 1) +
   scale_color_gradient(low = "blue", high = "red") +
-  geom_smooth(color = "black", size = .5) +
+  geom_smooth(color = "black", size = 0.5) +
   ylim(0, 700) +
   xlim(0, 700) +
   coord_equal() +
@@ -451,15 +443,13 @@ Results %>%
   geom_boxplot() +
   theme_minimal() +
   theme(legend.position = "none",
-        plot.title = element_text(hjust=0.5),
-        plot.subtitle = element_text(hjust=0.5)) +
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5)) +
   coord_flip()
 
 ```
 
-Finally, we present a results summary table depicting the R-squared, MAE, RMSE, and RMSE improvement over naive for each method discussed in this report. This table shows that we were able to significantly improve our model performance and ability to predict Site EUI using machine learning algorithms.
-
-**The final test set RMSE was 25.31, a 46.4% improvement over the naive model.** The final validation set (2019 RY) RMSE was 23.65, even lower than the test set.
+Finally, we present a results summary table depicting the R-squared, MAE, RMSE, and RMSE improvement over naive for each method discussed in this report. This table shows that we were able to significantly improve our model performance and ability to predict Site EUI using machine learning algorithms. **The final test set RMSE was 25.31, a 46.4% improvement over the naive model.** The final validation set (2019 RY) RMSE was 23.65, even lower than the test set.
 
 ```{r final table}
 
@@ -490,18 +480,13 @@ Results_Summary <- tibble(
   select(Method, Model, Rsquared, MAE, RMSE, `RMSE Improvement`) 
 
 Results_Summary %>%
-  knitr::kable(align = c('l', 'l', rep('c', 4)), 
-               digits = 2,
-               booktabs = TRUE,
-               caption = "Final Summary Table for All Models") %>%
-  kableExtra::row_spec(7, bold = TRUE) %>%
-  kableExtra::row_spec(6, hline_after = TRUE)
+  knitr::kable(align = c('l', 'l', rep('c', 4)), digits = 2)
 
 ```
 
 ### SECTION 4.2: Validation Set Exploratory Analysis
 
-I added this additional section because I was curious about the validation set as well. I created a regression plot similar to the ones above, and examined the RMSE by property type. I found that RMSE was greatest for data centers waste water treatment plants, and hospitals - some of the property types with the highest Site EUI. This lines up with our previous findings.
+I added this additional section because I was curious about the validation set as well. I created a regression plot similar to the ones above (with the addition of a marginal distribution plot), and examined the RMSE by property type. I found that RMSE was greatest for data centers waste water treatment plants, and hospitals - some of the property types with the highest Site EUI. This lines up with our previous findings.
 
 ```{r marginal plot, warning=FALSE, message=FALSE}
 
@@ -555,6 +540,6 @@ The goal of this project was to predict a building's Site EUI with machine learn
 
 This model can be used for many things including predicting energy use in future years with temperature changes, predicting site EUI for new properties or ones with missing energy consumption calculations, or flagging potential errors in user inputs. All applications which can assist New York City in achieving it's energy reduction targets.
 
-There are a few notable limitations. The first two have to do with the data quality. The weather data is not localized. It would be beneficial to have annual data by zip code rather than using a single value for the whole region. I suspect that improving this data quality would increase the importance of weather variables. I also did my best to remove errors when cleaning the data but there is no way to know if some of the remaining outliers are accurate or contain erroneous EUI calcs. Lastly, I ran in to a processing power roadblock when tuning and training the random forest model. A better computer would unlock more opportunities for optimizing the model.
+There are a few notable limitations. The first two have to do with the data quality. The weather data is not localized. It would be beneficial to have annual data by zip code rather than using a single value for the whole region. I suspect that this improvement would increase the importance of weather variables. I also did my best to remove errors when cleaning the data, but there is no way to know if some of the remaining outliers are accurate or contain erroneous EUI calcs due to user inputs. It is also possible that accurate observations were removed, as they were above my outlier threshold. Lastly, I ran in to a processing power roadblock when tuning and training the random forest model. A better computer would unlock more opportunities for optimizing the model.
 
-Future work can use similar modeling approaches to try and parse out EUI by energy use type - namely electricity and natural gas. This would provide additional value for calculating and projecting GHG emissions over time.
+Future work can use similar modeling approaches to try and parse out EUI by energy use type - namely electricity and natural gas. This would provide additional value for calculating and projecting GHG emissions over time, modelling energy interventions and retrofits, and aligning with changes in weather.
