@@ -1,11 +1,5 @@
 # Data retrieval and cleaning
 
-#### TO DO 
-
-# remove duplicates in every year
-# remove outiers? 
-
-
 # Load required packages
 if (!require(tidyverse)) install.packages('tidyverse')
 if (!require(RSocrata)) install.packages('RSocrata')
@@ -46,7 +40,6 @@ NYC_LL84_2016 <- RSocrata::read.socrata(API_2016) %>%
          "default_values" = default_values, 
          "temporary_values" = temporary_values) %>%
   distinct(property_id, .keep_all = TRUE)
-
 
 # Data for 2017 Calendar Year
 NYC_LL84_2017 <- RSocrata::read.socrata(API_2017) %>%
@@ -123,7 +116,7 @@ NYC_LL84_2019 <- RSocrata::read.socrata(API_2019) %>%
          "temporary_values" = temporary_values) %>%
   distinct(property_id, .keep_all = TRUE)
 
-# Merg all Local Law 84 reporting years
+# Merge all Local Law 84 reporting years
 NYC_LL84 <- rbind.data.frame(NYC_LL84_2016,
                              NYC_LL84_2017,
                              NYC_LL84_2018,
@@ -197,6 +190,8 @@ NYC_LL84 %>%
   knitr::kable()
 
 # Filter out the errors and outliers 
+# I use a cutoff of 2 x the median Site EUI for fast food restaurants (402.7 kBtu/sqft), 
+# the property type with the highest median EUI
 NYC_LL84 <- NYC_LL84 %>%
   filter(site_eui < 2*402.7)
 
